@@ -170,3 +170,15 @@ Checks: `pytest`, focused `ruff check`, and `black --check` on changed files.
 There is no claim that this workflow improves live-call latency or clone quality.
 
 The uploader mints a signed-in, expiring app token through the selected wful profile. Tokens are never written to take metadata or receipts. Long WAVs upload in bounded parts without resampling; finalization verifies original hashes. Interrupted uploads remain locally retryable. Private staged parts may remain until storage cleanup.
+
+### Bidirectional live feedback
+
+With a configured profile, Helvox opens an authenticated Wonderful WebSocket.
+New takes push invalidations to the review app; saved admin decisions flow back
+into a separate `review.json` beside the local take and into the recorder status.
+Reconnection rereads current decisions and retries queued uploads. There are no
+periodic server queries. Tk's local queue drain and socket shutdown timeout are
+local thread coordination, not server polling. Original audio/transcripts stay
+immutable. Run `helvox-live /path/to/recordings --profile swiss-german` to keep
+feedback connected independently of the recorder. Restart the recorder after
+installing this version to activate its built-in live connection.

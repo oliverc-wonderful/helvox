@@ -1,4 +1,5 @@
 import json
+import queue
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -12,6 +13,7 @@ from helvox.ui.rounded_canvas import RoundedCanvas
 from helvox.ui.settings import SettingsDialog
 from helvox.utils.platform import app_font, default_recordings_dir
 from helvox.utils.recorder import Recorder
+from helvox.utils.live import LiveFeedback
 from helvox.utils.sync import sync_take
 from helvox.utils.takes import archive_take, write_json
 
@@ -28,6 +30,8 @@ class App:
             user_config_path(appname="helvox", appauthor="noxenum") / "config.ini"
         )
 
+        self.live_feedback = None
+        self.live_after = None
         self.current_take = None
         self.sync_executor = ThreadPoolExecutor(max_workers=1)
         self.sync_future = None
@@ -265,6 +269,11 @@ class App:
             row=0, column=1, padx=5
         )
 
+        self.live_text = tk.StringVar(value="Live feedback disabled")
+        ttk.Label(settings_frame, textvariable=self.live_text, wraplength=650).grid(
+            row=1, column=0, columnspan=2, sticky="w"
+        )
+
         # Spacer
         ttk.Frame(main_frame).grid(row=3, column=0, sticky="nsew")
 
@@ -336,11 +345,46 @@ class App:
             self.recorder.save_settings(self.settings_path)
             self.recorder.load_data()
 
+        self.configure_live_feedback()
         self.clear_take()
         self.start_monitoring()
         self.load_next_sample()
 
         self.update_duration()
+
+    def configure_live_feedback(self):
+        if self.live_feedback:
+            self.live_feedback.stop()
+        if self.live_after:
+            self.root.after_cancel(self.live_after)
+        self.live_feedback = None
+        if self.recorder.sync_profile:
+            self.live_feedback = LiveFeedback(
+                self.recorder.output_folder, self.recorder.sync_profile
+            )
+            self.live_feedback.start()
+            self.drain_live_feedback()
+
+    def drain_live_feedback(self):
+        if not self.live_feedback:
+            return
+        try:
+            while True:
+                kind, payload = self.live_feedback.events.get_nowait()
+                if kind == "status":
+                    self.live_text.set(payload)
+                elif kind == "reconcile":
+                    self.request_sync()
+                elif kind == "review":
+                    folder, review = payload
+                    if review["reviewed_ts"]:
+                        record = json.loads((folder / "take.json").read_text())
+                        self.live_text.set(
+                            f"Live review · {record['sample_id']}: {review['status']} · {review['note']}"
+                        )
+        except queue.Empty:
+            pass
+        self.live_after = self.root.after(100, self.drain_live_feedback)
 
     def update_duration(self) -> None:
         total_seconds = self.recorder.total_duration
@@ -527,6 +571,8 @@ class App:
         except Exception:
             self.sync_text.set("Sync failed; local takes remain queued.")
         self.sync_future = None
+        if self.live_feedback:
+            self.live_feedback.refresh()
         if self.sync_requested:
             self.sync_requested = False
             self.request_sync()
@@ -686,5 +732,9 @@ class App:
         if self.recorder.recording:
             self.recorder.stop_recording()
             self.recorder.stop_monitoring()
+        if self.live_feedback:
+            self.live_feedback.stop()
+        if self.live_after:
+            self.root.after_cancel(self.live_after)
         self.sync_executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()
