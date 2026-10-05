@@ -26,7 +26,7 @@ def trim_silence(
     # WebRTC VAD only works with 16-bit PCM
     if audio.dtype == np.float32 or audio.dtype == np.float64:
         # Convert float [-1, 1] to int16
-        audio_int16 = (audio * 32767).astype(np.int16)
+        audio_int16 = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
     else:
         audio_int16 = audio.astype(np.int16)
 

@@ -116,3 +116,57 @@ Special thanks to all contributors and researchers working on dialect preservati
 
 <!-- MARKDOWN LINKS & IMAGES -->
 [ui-screenshot]: images/screenshot.png
+
+## Wonderful recording review integration
+
+This working copy adds a local post-recording technical GOOD/BAD judge and optional
+sync to the private Helvox Recording Review app. The upstream source is pinned at
+`c0f9f21a440a14613d1e103ea59a21abe2a40529`.
+
+In Settings → Quality & Sync, choose `reference` for Swiss TTS reference candidates
+(5–10.5 seconds) or `dataset` for individual TTS chunks (0.3–60 seconds). The 8–10
+second evaluator range is a starting point, not an acoustic optimum. Choose complete
+scripts; never rush or cut words to fit. Read frozen visible SOSG output with native
+pronunciation. Never speak a dialect-conditioning prefix or insert forced pauses at
+independent TTS-request boundaries when recording a grouped reference.
+
+After stopping, BAD means re-record for a concrete technical defect: invalid mono
+audio, unsuitable duration, capture errors, clipping, silence/very low RMS or no
+sustained detected speech. Noise estimates, low levels and possible cut edges are
+listening warnings. GOOD means these checks passed; it does not certify transcript,
+native dialect, one speaker, clean endings, background noise or reference quality.
+Preview the raw and trimmed take, then confirm the listening checklist before saving.
+Thresholds are versioned (`swiss-reference-v1`) and need calibration against labelled
+native recordings. ASR errors are not automatically treated as misread words.
+
+Every attempt is preserved under `<output>/<speaker>/takes/<recording-uuid>/`, including
+raw.wav, audio.wav, take.json and an optional sync.json receipt. The original accepted
+FLAC dataset remains compatible. Do not edit immutable audio/transcripts after capture.
+A revised reading gets a new take. Capture errors cannot be fixed by automatic trim.
+
+Sync is disabled until a Wonderful CLI profile is explicitly configured. For this
+project use your authorized `swiss-german` profile. Sync transfers rejected attempts
+as well as accepted ones. It uses the authenticated wful CLI; no API key is stored in
+Helvox settings. Failed uploads remain local and can be retried after restart:
+
+```sh
+pip install -e '.[dev]'
+helvox
+helvox-sync /path/to/recordings --profile swiss-german
+```
+
+The admin app shows date, speaker ID, dialect, script, technical reasons and metrics,
+raw/trimmed playback and independent listening approval or retake instructions.
+It is restricted; recorders see their own takes and administrators review across
+speakers. Sync receipts assume you keep the same Wonderful identity for a profile.
+If that profile is repointed or signed in as another person, use a new profile name.
+
+Import datasets from the verified bank with `scripts/create_recording_dataset.py`.
+Default exports 400 grouped readouts; `--individual-chunks` exports 800 requests for
+dataset collection. These are exact synthesis-returned text, not word-to-acoustic-batch
+alignment or a production-call corpus. Native transcript approval remains required.
+
+Checks: `pytest`, focused `ruff check`, and `black --check` on changed files.
+There is no claim that this workflow improves live-call latency or clone quality.
+
+The uploader mints a signed-in, expiring app token through the selected wful profile. Tokens are never written to take metadata or receipts. Long WAVs upload in bounded parts without resampling; finalization verifies original hashes. Interrupted uploads remain locally retryable. Private staged parts may remain until storage cleanup.

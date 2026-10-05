@@ -23,6 +23,8 @@ classifiers = [
 ]
 
 dependencies = [
+    "numpy>=1.24",
+    "setuptools>=68,<81",  # webrtcvad imports pkg_resources at runtime
     "sounddevice>=0.5.3",
     "soundfile>=0.13.1",
     "platformdirs>=4.5.0",
@@ -41,6 +43,7 @@ build = ["pyinstaller>=6.8.0", "pillow>=10.0.0", "setuptools<70"]
 
 [project.scripts]
 helvox = "helvox.main:main"
+helvox-sync = "helvox.utils.sync:main"
 
 [project.gui-scripts]
 helvox-gui = "helvox.main:main"

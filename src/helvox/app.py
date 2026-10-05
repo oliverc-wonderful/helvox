@@ -1,6 +1,8 @@
+import json
 import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from platformdirs import user_config_path
 
@@ -10,6 +12,8 @@ from helvox.ui.rounded_canvas import RoundedCanvas
 from helvox.ui.settings import SettingsDialog
 from helvox.utils.platform import app_font, default_recordings_dir
 from helvox.utils.recorder import Recorder
+from helvox.utils.sync import sync_take
+from helvox.utils.takes import archive_take, write_json
 
 
 class App:
@@ -24,6 +28,10 @@ class App:
             user_config_path(appname="helvox", appauthor="noxenum") / "config.ini"
         )
 
+        self.current_take = None
+        self.sync_executor = ThreadPoolExecutor(max_workers=1)
+        self.sync_future = None
+        self.sync_requested = False
         self.setup_window()
         self.setup_ui()
 
@@ -102,7 +110,7 @@ class App:
         # update wraplength dynamically
         de_text_label.bind(
             "<Configure>",
-            lambda e: e.widget.configure(wraplength=e.width - 10),
+            lambda e: e.widget.configure(wraplength=max(1, e.width - 10)),
         )
 
         # CH
@@ -130,7 +138,7 @@ class App:
         # update wraplength dynamically
         ch_text_label.bind(
             "<Configure>",
-            lambda e: e.widget.configure(wraplength=e.width - 10),
+            lambda e: e.widget.configure(wraplength=max(1, e.width - 10)),
         )
 
         # CH (Editable)
@@ -232,6 +240,31 @@ class App:
         )
         self.record_btn.grid(row=4, column=3, padx=5)
 
+        self.quality_text = tk.StringVar(
+            value="Record a take to run the technical judge."
+        )
+        ttk.Label(recording_frame, textvariable=self.quality_text, wraplength=650).grid(
+            row=5, column=1, columnspan=3, sticky="w", pady=8
+        )
+        self.listened_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            recording_frame,
+            text=(
+                "I listened: exact words, intended dialect, one voice, clean complete"
+                " sounds."
+            ),
+            variable=self.listened_var,
+        ).grid(row=6, column=1, columnspan=3, sticky="w")
+        self.sync_text = tk.StringVar(
+            value="Sync disabled until a Wonderful profile is configured."
+        )
+        ttk.Label(settings_frame, textvariable=self.sync_text).grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Button(settings_frame, text="Retry sync", command=self.request_sync).grid(
+            row=0, column=1, padx=5
+        )
+
         # Spacer
         ttk.Frame(main_frame).grid(row=3, column=0, sticky="nsew")
 
@@ -291,6 +324,8 @@ class App:
             self.recorder.speaker_id = result["speaker_id"]
             self.recorder.speaker_dialect = result["speaker_dialect"]
             self.recorder.input_file = result["input_file"]
+            self.recorder.purpose = result["purpose"]
+            self.recorder.sync_profile = result["sync_profile"]
             self.recorder.output_file = (
                 Path(result["output_folder"]) / result["speaker_id"] / "output.json"
             )
@@ -301,6 +336,7 @@ class App:
             self.recorder.save_settings(self.settings_path)
             self.recorder.load_data()
 
+        self.clear_take()
         self.start_monitoring()
         self.load_next_sample()
 
@@ -314,7 +350,8 @@ class App:
         milliseconds = int((total_seconds - int(total_seconds)) * 100)
 
         self.duration_text.set(
-            f"Total Duration: {hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:02d}"
+            "Total Duration:"
+            f" {hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:02d}"
         )
 
     def update_level_meter(self) -> None:
@@ -393,7 +430,18 @@ class App:
 
     def toggle_recording(self) -> None:
         if not self.recorder.recording:
-            self.recorder.start_recording()
+            if self.current_id is None:
+                return
+            self.clear_take()
+            try:
+                self.recorder.start_recording()
+            except Exception:
+                self.recorder.recording = False
+                messagebox.showerror(
+                    "Microphone",
+                    "Could not start recording. Check the selected microphone.",
+                )
+                return
             self.clear_waveform_canvas()
             self.record_btn.config(
                 text="Stop Recording", bg_color="#8B0000", dot=False
@@ -402,6 +450,86 @@ class App:
             self.recorder.stop_recording()
             self.record_btn.config(text="REC", bg_color="#000000", dot=True)  # Black
             self.update_waveform()
+            report = self.recorder.quality
+            self.quality_text.set(
+                report["verdict"]
+                + " — "
+                + (
+                    " ".join(report["reasons"] + report["warnings"])
+                    or "Technical checks passed. Listen before accepting."
+                )
+            )
+            if (
+                self.recorder.full_audio is not None
+                and self.recorder.trimmed_audio is not None
+            ):
+                try:
+                    self.current_take = archive_take(
+                        self.recorder.output_folder,
+                        speaker_id=self.recorder.speaker_id,
+                        sample_id=self.current_id,
+                        dialect=self.recorder.speaker_dialect,
+                        text_de=self.de_text_var.get(),
+                        text_ch=self.ch_text_edit_var.get(),
+                        audio=self.recorder.trimmed_audio,
+                        raw_audio=self.recorder.full_audio,
+                        sample_rate=self.recorder.sample_rate,
+                        quality=report,
+                        microphone=self.recorder.selected_device,
+                    )
+                except (OSError, ValueError) as error:
+                    messagebox.showerror("Take not saved", str(error))
+                else:
+                    self.request_sync()
+
+    def clear_take(self):
+        self.current_take = None
+        self.recorder.full_audio = None
+        self.recorder.trimmed_audio = None
+        self.recorder.quality = None
+        self.listened_var.set(False)
+        self.quality_text.set("Record a new take to run the technical judge.")
+        self.clear_waveform_canvas()
+
+    def request_sync(self):
+        profile = self.recorder.sync_profile
+        if not profile:
+            self.sync_text.set(
+                "Local only. Configure a Wonderful profile to enable sync."
+            )
+            return
+        if self.sync_future is not None:
+            self.sync_requested = True
+            return
+        folder = self.recorder.output_folder
+
+        def upload_pending():
+            successes, failures = 0, 0
+            for file in folder.rglob("take.json"):
+                try:
+                    sync_take(file.parent, profile)
+                    successes += 1
+                except Exception:
+                    failures += 1
+            return successes, failures
+
+        self.sync_text.set("Syncing recordings… local copies remain safe.")
+        self.sync_future = self.sync_executor.submit(upload_pending)
+        self.root.after(100, self.poll_sync)
+
+    def poll_sync(self):
+        if not self.sync_future.done():
+            self.root.after(100, self.poll_sync)
+            return
+        try:
+            successes, failures = self.sync_future.result()
+            self.sync_text.set(f"{successes} synced; {failures} pending retry.")
+        except Exception:
+            self.sync_text.set("Sync failed; local takes remain queued.")
+        self.sync_future = None
+        if self.sync_requested:
+            self.sync_requested = False
+            self.request_sync()
 
     def clear_waveform_canvas(self) -> None:
         self.waveform_canvas_full.delete("all")
@@ -413,6 +541,9 @@ class App:
     def load_next_sample(self) -> None:
         self.current_id = self.recorder.get_next_id()
         if self.current_id is None:
+            self.de_text_var.set("All samples completed.")
+            self.ch_text_var.set("")
+            self.ch_text_edit_var.set("")
             return
 
         sample = self.recorder.get_sample_by_id(self.current_id)
@@ -494,8 +625,32 @@ class App:
         self.update_waveform()
 
     def save(self) -> None:
-        if self.recorder.trimmed_audio is None:
+        if self.recorder.recording or self.current_take is None:
             return
+        if self.recorder.quality["verdict"] == "BAD":
+            messagebox.showwarning(
+                "Re-record needed", " ".join(self.recorder.quality["reasons"])
+            )
+            return
+        if not self.listened_var.get():
+            messagebox.showwarning(
+                "Listen first",
+                "Preview the take and confirm exact words, dialect and clean complete"
+                " speech.",
+            )
+            return
+        record = json.loads(
+            (self.current_take / "take.json").read_text(encoding="utf-8")
+        )
+        if record["text_ch"] != self.ch_text_edit_var.get():
+            messagebox.showwarning(
+                "Transcript changed",
+                "The transcript changed after recording. Record the revised text"
+                " again.",
+            )
+            return
+        record["human_review"] = "accepted_by_speaker"
+        write_json(self.current_take / "take.json", record)
 
         duration_s = self.recorder.save_audio(self.current_id)
         self.recorder.add_sample(
@@ -505,18 +660,24 @@ class App:
             dialect=self.recorder.speaker_dialect,
             audio_path=f"{self.current_id}.flac",
             duration_s=duration_s,
+            recording_id=record["recording_id"],
+            quality=self.recorder.quality,
         )
 
         self.recorder.audio_data = []
         self.recorder.full_audio = None
         self.recorder.trimmed_audio = None
 
-        self.clear_waveform_canvas()
+        self.request_sync()
+        self.clear_take()
 
         self.update_duration()
         self.load_next_sample()
 
     def skip(self):
+        if self.recorder.recording or self.current_id is None:
+            return
+        self.clear_take()
         self.recorder.add_skip(self.current_id)
         self.load_next_sample()
 
@@ -524,5 +685,6 @@ class App:
         self.recorder.stop_monitoring()
         if self.recorder.recording:
             self.recorder.stop_recording()
-        self.root.destroy()
+            self.recorder.stop_monitoring()
+        self.sync_executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()

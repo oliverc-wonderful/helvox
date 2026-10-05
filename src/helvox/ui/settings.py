@@ -4,6 +4,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from helvox.utils.platform import app_font
 from helvox.utils.recorder import Recorder
+from helvox.utils.takes import validate_component
 
 
 class SettingsDialog:
@@ -85,10 +86,36 @@ class SettingsDialog:
         tab_speaker = ttk.Frame(tab_control)
         tab_data = ttk.Frame(tab_control)
         tab_audio = ttk.Frame(tab_control)
+        tab_review = ttk.Frame(tab_control)
 
         tab_control.add(tab_speaker, text="Speaker")
         tab_control.add(tab_data, text="Data")
         tab_control.add(tab_audio, text="Audio")
+        tab_control.add(tab_review, text="Quality & Sync")
+        ttk.Label(
+            tab_review, text="Purpose (reference clips must be 5–10.5 seconds)"
+        ).pack(anchor="w", padx=15, pady=10)
+        self.purpose_var = tk.StringVar(value=self.recorder.purpose)
+        ttk.Combobox(
+            tab_review,
+            textvariable=self.purpose_var,
+            values=("reference", "dataset"),
+            state="readonly",
+        ).pack(anchor="w", padx=15)
+        ttk.Label(
+            tab_review, text="Wonderful CLI profile (blank keeps recordings local)"
+        ).pack(anchor="w", padx=15, pady=10)
+        self.profile_var = tk.StringVar(value=self.recorder.sync_profile)
+        ttk.Entry(tab_review, textvariable=self.profile_var).pack(fill="x", padx=15)
+        ttk.Label(
+            tab_review,
+            text=(
+                "Uses your signed-in wful profile. No API key is stored.\nSync sends"
+                " raw and trimmed takes, including rejected attempts.\nOnly enable for"
+                " a workspace authorized to hold these recordings."
+            ),
+            wraplength=550,
+        ).pack(anchor="w", padx=15, pady=15)
 
         tab_control.grid(row=0, column=0, sticky="ew")
 
@@ -314,6 +341,12 @@ class SettingsDialog:
             self.speaker_input.focus_set()
             return False
 
+        try:
+            validate_component(speaker_id)
+        except ValueError as error:
+            messagebox.showwarning("Invalid Speaker ID", str(error), parent=self.dialog)
+            return False
+
         folder_path = Path(self.folder_var.get())
         if not folder_path.exists():
             messagebox.showwarning(
@@ -345,6 +378,8 @@ class SettingsDialog:
             "output_folder": self.folder_var.get(),
             "device": self.device_var.get(),
             "input_file": self.file_var.get(),
+            "purpose": self.purpose_var.get(),
+            "sync_profile": self.profile_var.get().strip(),
         }
         self.dialog.destroy()
 

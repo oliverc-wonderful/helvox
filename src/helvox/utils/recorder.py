@@ -9,6 +9,8 @@ import soundfile as sf
 from sounddevice import CallbackFlags
 
 from helvox.utils.data import read_dataset
+from helvox.utils.quality import judge_recording
+from helvox.utils.takes import validate_component
 from helvox.utils.trim import trim_silence
 
 
@@ -20,6 +22,10 @@ class Recorder:
         channels: int = 1,
     ) -> None:
         self.recording = False
+        self.capture_errors = []
+        self.quality = None
+        self.purpose = "reference"
+        self.sync_profile = ""
         self.monitoring = False
         self.output_folder = Path(output_folder)
         self.sample_rate = sample_rate
@@ -133,10 +139,16 @@ class Recorder:
 
         self.recording = True
         self.audio_data = []
+        self.capture_errors = []
+        self.quality = None
+        self.full_audio = None
+        self.trimmed_audio = None
 
         def callback(indata: np.ndarray, frames, time, status: CallbackFlags):
             if status:
                 print(status)
+            if status:
+                self.capture_errors.append(str(status))
             self.audio_data.append(indata.copy())
 
             # Update level during recording
@@ -168,10 +180,28 @@ class Recorder:
                     padding_duration_s=0.1,
                 )
 
+            self.quality = judge_recording(
+                self.trimmed_audio,
+                self.sample_rate,
+                purpose=self.purpose,
+                capture_errors=self.capture_errors,
+            )
+
+            raw_quality = judge_recording(
+                self.full_audio, self.sample_rate, purpose="dataset"
+            )
+            self.quality["metrics"]["raw"] = raw_quality["metrics"]
+            for reason in raw_quality["reasons"]:
+                if "Clipping" in reason and reason not in self.quality["reasons"]:
+                    self.quality["reasons"].append(reason)
+                    self.quality["verdict"] = "BAD"
+
             # Restart monitoring after recording stops
             self.start_monitoring()
 
     def save_audio(self, filename: str) -> float:
+        validate_component(self.speaker_id)
+        validate_component(filename)
         audio_path = self.output_folder / self.speaker_id / "audio" / f"{filename}.flac"
 
         if not audio_path.parent.exists():
@@ -217,6 +247,8 @@ class Recorder:
 
         # Flatten audio data and normalize to [-1, 1]
         data = audio.flatten()
+        if not len(data):
+            return [0] * num_points
         max_val = np.max(np.abs(data))
         if max_val > 0:
             data = data / max_val
@@ -262,6 +294,8 @@ class Recorder:
             "speaker_id": self.speaker_id,
             "speaker_dialect": self.speaker_dialect,
             "input_file": self.input_file,
+            "purpose": self.purpose,
+            "sync_profile": self.sync_profile,
         }
 
         with open(config_path, "w") as configfile:
@@ -282,6 +316,9 @@ class Recorder:
         self.speaker_id = settings.get("speaker_id", self.speaker_id)
         self.speaker_dialect = settings.get("speaker_dialect", self.speaker_dialect)
         self.input_file = settings.get("input_file", self.input_file)
+
+        self.purpose = settings.get("purpose", "reference")
+        self.sync_profile = settings.get("sync_profile", "")
 
         self.output_file = self.output_folder / self.speaker_id / "output.json"
         self.skipped_file = self.output_folder / self.speaker_id / "skipped.txt"
@@ -359,6 +396,8 @@ class Recorder:
         dialect: str,
         audio_path: str,
         duration_s: float,
+        recording_id: str = "",
+        quality: Optional[dict] = None,
     ) -> None:
         sample = {
             "id": id,
@@ -367,9 +406,15 @@ class Recorder:
             "dialect": dialect.lower(),
             "audio": audio_path,
             "duration_s": duration_s,
+            "recording_id": recording_id,
+            "quality": quality,
         }
 
+        self.output_data = [
+            item for item in self.output_data if str(item["id"]) != str(id)
+        ]
         self.output_data.append(sample)
+        self.output_index[str(id)] = sample
 
         if not Path(self.skipped_file).parent.exists():
             Path(self.skipped_file).parent.mkdir(parents=True, exist_ok=True)
