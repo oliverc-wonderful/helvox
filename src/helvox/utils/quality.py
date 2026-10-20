@@ -5,7 +5,7 @@ import math
 import numpy as np
 import webrtcvad
 
-POLICY_VERSION = "swiss-reference-v1"
+POLICY_VERSION = "swiss-reference-v2"
 
 
 def judge_recording(audio, sample_rate, *, purpose="reference", capture_errors=()):
@@ -53,13 +53,6 @@ def judge_recording(audio, sample_rate, *, purpose="reference", capture_errors=(
         peak_dbfs=db(float(np.max(np.abs(x)))),
         dc_offset=float(np.mean(x)),
     )
-    minimum, maximum = (5.0, 10.5) if purpose == "reference" else (0.3, 60.0)
-    if not minimum <= duration <= maximum:
-        reasons.append(
-            f"Duration {duration:.2f}s is outside {minimum:g}–{maximum:g}s for"
-            f" {purpose}. Use a complete shorter/longer script; do not rush or cut"
-            " words."
-        )
     if capture_errors:
         reasons.append("Microphone capture reported lost/invalid frames. Record again.")
     metrics["capture_errors"] = list(capture_errors)

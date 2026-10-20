@@ -124,19 +124,18 @@ sync to the private Helvox Recording Review app. The upstream source is pinned a
 `c0f9f21a440a14613d1e103ea59a21abe2a40529`.
 
 In Settings → Quality & Sync, choose `reference` for Swiss TTS reference candidates
-(5–10.5 seconds) or `dataset` for individual TTS chunks (0.3–60 seconds). The 8–10
-second evaluator range is a starting point, not an acoustic optimum. Choose complete
-scripts; never rush or cut words to fit. Read frozen visible SOSG output with native
+or `dataset` for individual TTS chunks. Duration is measured but does not gate
+acceptance. Choose complete scripts; never rush or cut words to fit. Read frozen visible SOSG output with native
 pronunciation. Never speak a dialect-conditioning prefix or insert forced pauses at
 independent TTS-request boundaries when recording a grouped reference.
 
 After stopping, BAD means re-record for a concrete technical defect: invalid mono
-audio, unsuitable duration, capture errors, clipping, silence/very low RMS or no
+audio, capture errors, clipping, silence/very low RMS or no
 sustained detected speech. Noise estimates, low levels and possible cut edges are
 listening warnings. GOOD means these checks passed; it does not certify transcript,
 native dialect, one speaker, clean endings, background noise or reference quality.
 Preview the raw and trimmed take, then confirm the listening checklist before saving.
-Thresholds are versioned (`swiss-reference-v1`) and need calibration against labelled
+Thresholds are versioned (`swiss-reference-v2`) and need calibration against labelled
 native recordings. ASR errors are not automatically treated as misread words.
 
 Every attempt is preserved under `<output>/<speaker>/takes/<recording-uuid>/`, including

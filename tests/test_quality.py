@@ -28,11 +28,14 @@ def test_technical_good_with_pending_linguistic_review(speech):
     assert report["metrics"]["estimated_speech_noise_db"] is None
 
 
-@pytest.mark.parametrize("seconds", [4.99, 10.51])
-def test_reference_duration_rejects_complete_short_or_long(speech, seconds):
-    report = judge_recording(np.resize(speech, (round(seconds * 48000), 1)), 48000)
-    assert report["verdict"] == "BAD"
-    assert any("Duration" in reason for reason in report["reasons"])
+@pytest.mark.parametrize("purpose", ["reference", "dataset"])
+@pytest.mark.parametrize("seconds", [1.0, 4.99, 10.51, 61.0])
+def test_duration_does_not_reject_valid_audio(speech, seconds, purpose):
+    report = judge_recording(
+        np.resize(speech, (round(seconds * 48000), 1)), 48000, purpose=purpose
+    )
+    assert report["verdict"] == "GOOD"
+    assert report["metrics"]["duration_s"] == seconds
 
 
 def test_dataset_does_not_apply_short_reference_minimum(speech):

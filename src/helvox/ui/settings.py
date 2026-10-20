@@ -93,7 +93,7 @@ class SettingsDialog:
         tab_control.add(tab_audio, text="Audio")
         tab_control.add(tab_review, text="Quality & Sync")
         ttk.Label(
-            tab_review, text="Purpose (reference clips must be 5–10.5 seconds)"
+            tab_review, text="Purpose"
         ).pack(anchor="w", padx=15, pady=10)
         self.purpose_var = tk.StringVar(value=self.recorder.purpose)
         ttk.Combobox(
